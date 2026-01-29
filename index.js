@@ -5,95 +5,116 @@ const Groq = require("groq-sdk");
 const app = express();
 app.use(express.json());
 
-// ENV Variables (Back4app ড্যাশবোর্ড থেকে সেট করবে)
+// ENV variables (Back4app থেকে আসবে)
 const TOKEN = process.env.BOT_TOKEN;
 const APP_URL = process.env.APP_URL; 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const PORT = process.env.PORT || 3000;
-const SUPER_ADMIN = parseInt(process.env.ADMIN_ID); // তোমার টেলিগ্রাম আইডি
+const SUPER_ADMIN = process.env.ADMIN_ID ? parseInt(process.env.ADMIN_ID) : null;
 
-const bot = new TelegramBot(TOKEN);
-const groq = new Groq({ apiKey: GROQ_API_KEY });
+// হেলথ চেক রুট (এটি সবার আগে যাতে পোর্ট ডিটেক্ট হয়)
+app.get("/", (req, res) => {
+  res.status(200).send("থটস অফ লেউটা Bot Server Running ✅");
+});
 
-// ইন-মেমোরি ডাটাবেজ (সিম্পল রাখার জন্য)
+// সার্ভার লিসেনিং
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
+
+// ডাটাবেজ (সিম্পল ইন-মেমোরি)
 let db = {
     users: [],
-    admins: [SUPER_ADMIN],
     banned: [],
     startTime: Date.now()
 };
 
-// Webhook Setup
-bot.setWebHook(`${APP_URL}/bot${TOKEN}`);
+if (!TOKEN || !APP_URL || !GROQ_API_KEY) {
+    console.error("❌ CRITICAL ERROR: API keys are missing in Environment Variables!");
+} else {
+    const bot = new TelegramBot(TOKEN);
+    const groq = new Groq({ apiKey: GROQ_API_KEY });
 
-app.post(`/bot${TOKEN}`, (req, res) => {
-    bot.processUpdate(req.body);
-    res.sendStatus(200);
-});
+    // Webhook setup
+    bot.setWebHook(`${APP_URL}/bot${TOKEN}`);
 
-// --- লজিক শুরু ---
+    app.post(`/bot${TOKEN}`, (req, res) => {
+        bot.processUpdate(req.body);
+        res.sendStatus(200);
+    });
 
-// ইউজার ট্র্যাকিং
-bot.on('message', (msg) => {
-    if (msg.from && !db.users.includes(msg.from.id)) {
-        db.users.push(msg.from.id);
-    }
-});
-
-// এডমিন কমান্ড
-bot.onText(/\/admin/, (msg) => {
-    if (msg.from.id !== SUPER_ADMIN) return bot.sendMessage(msg.chat.id, "তোর অউকাত নাই!");
-    
-    bot.sendMessage(msg.chat.id, "🧑‍💼 Admin Panel", {
-        reply_markup: {
-            inline_keyboard: [
-                [{ text: "📊 Stats", callback_data: "stats" }, { text: "🟢 Status", callback_data: "status" }]
-            ]
+    // ১. ইউজার ট্র্যাকিং মিডলওয়্যার
+    bot.on('message', (msg) => {
+        if (msg.from && !db.users.includes(msg.from.id)) {
+            db.users.push(msg.from.id);
         }
     });
-});
 
-// রোস্টিং লজিক
-bot.on('message', async (msg) => {
-    if (msg.text && msg.text.startsWith('/')) return; // কমান্ড ইগনোর করবে
-    if (db.banned.includes(msg.from.id)) return;
-
-    // নাম জিজ্ঞাসা করলে
-    if (msg.text && (msg.text.includes('নাম কি') || msg.text.includes('তোর নাম'))) {
-        return bot.sendMessage(msg.chat.id, "আমার নাম থটস অফ লেওটা 🥴😎");
-    }
-
-    try {
-        const chatCompletion = await groq.chat.completions.create({
-            messages: [
-                { role: "system", content: "You are a savage Bengali roaster 'থটস অফ লেওটা 🥴😎'. Use 'তুই-তোকারি'. Be extremely funny, local, and rude to the user. তাকে খুব খারাপ ভাষায় বকাবকি করবে যেমন: বোকাচোদ, মাদারচোদ, ভোদাই। তাকে খুব খারাপ ভাবে অপমান করবে " },
-                { role: "user", content: msg.text || "এই ছবি বা ভিডিওটা দেখ" }খুব খারাপ ভাবে অপমান করবে 
-            ],
-            model: "llama3-8b-8192",
+    // ২. অ্যাডমিন প্যানেল কমান্ড (/admin)
+    bot.onText(/\/admin/, (msg) => {
+        if (msg.from.id !== SUPER_ADMIN) return bot.sendMessage(msg.chat.id, "তোর অউকাত নাই এই কমান্ড দেওয়ার। 🥴");
+        
+        bot.sendMessage(msg.chat.id, "🧑‍💼 থটস অফ লেউটা - Admin Panel", {
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: "📊 Stats", callback_data: "stats" }, { text: "🟢 Status", callback_data: "status" }],
+                    [{ text: "📢 Broadcast", callback_data: "bc_req" }]
+                ]
+            }
         });
+    });
 
-        bot.sendMessage(msg.chat.id, chatCompletion.choices[0].message.content, {
-            reply_to_message_id: msg.message_id
+    // ৩. রোস্টিং এবং নাম চেক লজিক
+    bot.on('message', async (msg) => {
+        if (msg.text && msg.text.startsWith('/')) return; // কমান্ড ইগনোর
+        if (db.banned.includes(msg.from.id)) return;
+
+        // নাম জিজ্ঞাসা করলে
+        const text = msg.text || "";
+        if (text.includes('নাম কি') || text.includes('তোর নাম')) {
+            return bot.sendMessage(msg.chat.id, "আমার নাম 'থটস অফ লেউটা' 🥴😎");
+        }
+
+        try {
+            const prompt = "You are a savage, funny, and extremely rude Bengali roaster named 'থটস অফ লেউটা'. Use 'তুই-তোকারি'. Be informal and use local slang (বলদ, আবাল, ফকিন্নি). Roast the user based on their input.";
+            const completion = await groq.chat.completions.create({
+                messages: [
+                    { role: "system", content: prompt },
+                    { role: "user", content: text || "ছবি পাঠাইছে আবালটা" }
+                ],
+                model: "llama3-8b-8192",
+            });
+
+            bot.sendMessage(msg.chat.id, completion.choices[0].message.content, {
+                reply_to_message_id: msg.message_id
+            });
+        } catch (e) {
+            console.error("AI Error:", e.message);
+        }
+    });
+
+    // ৪. ব্রডকাস্টিং কমান্ড
+    bot.onText(/\/send (.+)/, (msg, match) => {
+        if (msg.from.id !== SUPER_ADMIN) return;
+        const bcMsg = match[1];
+        let count = 0;
+        db.users.forEach(uid => {
+            bot.sendMessage(uid, bcMsg).catch(() => {});
+            count++;
         });
-    } catch (e) {
-        console.error("AI Error");
-    }
-});
+        bot.sendMessage(msg.chat.id, `📢 ${count} জন ফকিন্নিকে মেসেজ পাঠানো হয়েছে।`);
+    });
 
-// Callback Query Handler (Admin Buttons)
-bot.on('callback_query', (query) => {
-    const chatId = query.message.chat.id;
-    if (query.data === 'stats') {
-        bot.sendMessage(chatId, `Total Users: ${db.users.length}\nBanned: ${db.banned.length}`);
-    } else if (query.data === 'status') {
-        const uptime = Math.floor((Date.now() - db.startTime) / 1000 / 60);
-        bot.sendMessage(chatId, `Bot is Live ✅\nUptime: ${uptime} mins`);
-    }
-});
-
-// Health Check & Root
-app.get("/", (req, res) => res.send("WhatsApp Leo Bot is Running... 🥴"));
-
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
+    // ৫. ইনলাইন বাটন হ্যান্ডলার
+    bot.on('callback_query', (query) => {
+        const chatId = query.message.chat.id;
+        if (query.data === 'stats') {
+            bot.sendMessage(chatId, `📊 Stats:\nTotal Users: ${db.users.length}\nBanned: ${db.banned.length}`);
+        } else if (query.data === 'status') {
+            const uptime = Math.floor((Date.now() - db.startTime) / 1000 / 60);
+            bot.sendMessage(chatId, `🟢 Bot Status: Online\n⏳ Uptime: ${uptime} mins\n⚙️ Name: থটস অফ লেউটা`);
+        } else if (query.data === 'bc_req') {
+            bot.sendMessage(chatId, "ব্রডকাস্ট করতে লেখো: \n/send [মেসেজ]");
+        }
+    });
+}
